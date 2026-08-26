@@ -3,14 +3,26 @@
 -- Run this in Supabase SQL Editor
 -- ============================================
 
--- 1. ENSURE BANNERS RLS POLICY IS CORRECT
--- The latest migration (20260824103302) missed the banners policy
+-- ============================================
+-- STEP 1: ENSURE BANNERS TABLE HAS ALL REQUIRED COLUMNS
+-- ============================================
+ALTER TABLE public.banners 
+ADD COLUMN IF NOT EXISTS button_label TEXT,
+ADD COLUMN IF NOT EXISTS button_link TEXT,
+ADD COLUMN IF NOT EXISTS gradient_from TEXT NOT NULL DEFAULT 'from-violet-500',
+ADD COLUMN IF NOT EXISTS gradient_to TEXT NOT NULL DEFAULT 'to-fuchsia-600';
+
+-- ============================================
+-- STEP 2: FIX BANNERS RLS POLICY
+-- ============================================
 DROP POLICY IF EXISTS "Enable read access for all" ON public.banners;
 CREATE POLICY "Enable read access for all" ON public.banners
 FOR SELECT TO anon, authenticated
 USING (active = true);
 
--- 2. SEED CATEGORIES (Missing from supabase_fresh_setup.sql)
+-- ============================================
+-- STEP 3: SEED CATEGORIES (31 categories)
+-- ============================================
 INSERT INTO public.categories (name, slug, icon, sort_order) VALUES
   ('Electronics', 'electronics', '📱', 1),
   ('Mobile Phones', 'mobile-phones', '📱', 2),
@@ -45,8 +57,9 @@ INSERT INTO public.categories (name, slug, icon, sort_order) VALUES
   ('Automotive', 'automotive', '🚗', 70)
 ON CONFLICT (slug) DO NOTHING;
 
--- 3. SEED BANNERS WITH PROPER IMAGE URLS (Replace placeholder.svg with actual images)
--- Using placeholder images from a reliable source
+-- ============================================
+-- STEP 4: SEED BANNERS WITH REAL IMAGES
+-- ============================================
 INSERT INTO public.banners (placement, title, subtitle, image_url, link_url, sort_order, active, button_label, button_link, gradient_from, gradient_to) VALUES
   ('hero_slider', 'Mobile Mega Offer', 'Best deals on smartphones', 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=1920&q=80', '/category/electronics', 1, true, 'Shop Now', '/category/electronics', 'from-blue-600', 'to-blue-800'),
   ('hero_slider', 'Fashion Bonanza', 'Up to 70% OFF on trendy styles', 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=1920&q=80', '/category/fashion', 2, true, 'Explore Fashion', '/category/fashion', 'from-pink-500', 'to-rose-600'),
@@ -55,19 +68,17 @@ INSERT INTO public.banners (placement, title, subtitle, image_url, link_url, sor
   ('hero_side', 'Beauty Week', 'Up to 60% OFF', 'https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=400&q=80', '/category/beauty-personal-care', 2, true, 'Shop Beauty', '/category/beauty-personal-care', 'from-rose-400', 'to-pink-600')
 ON CONFLICT DO NOTHING;
 
--- 4. ADD ADMIN ROLE FOR THE ADMIN USER
--- Replace 'emransha952@gmail.com' with your actual admin email if different
--- This gives the user admin access to the admin panel
+-- ============================================
+-- STEP 5: ADD ADMIN ROLE FOR ADMIN USER
+-- ============================================
 DO $$
 DECLARE
     admin_email TEXT := 'emransha952@gmail.com';
     admin_user_id UUID;
 BEGIN
-    -- Get the user ID from auth.users
     SELECT id INTO admin_user_id FROM auth.users WHERE email = admin_email;
     
     IF admin_user_id IS NOT NULL THEN
-        -- Insert admin role
         INSERT INTO public.user_roles (user_id, role)
         VALUES (admin_user_id, 'admin')
         ON CONFLICT (user_id, role) DO NOTHING;
@@ -78,7 +89,9 @@ BEGIN
     END IF;
 END $$;
 
--- 5. ENSURE USER ROLES TABLE HAS CORRECT RLS POLICIES
+-- ============================================
+-- STEP 6: USER ROLES RLS POLICIES
+-- ============================================
 DROP POLICY IF EXISTS "Users can view own roles" ON public.user_roles;
 CREATE POLICY "Users can view own roles" ON public.user_roles
 FOR SELECT TO authenticated
@@ -95,25 +108,33 @@ FOR ALL TO authenticated
 USING (public.has_role(auth.uid(), 'admin'))
 WITH CHECK (public.has_role(auth.uid(), 'admin'));
 
--- 6. VERIFY PRODUCTS RLS POLICY (should already exist but let's ensure)
+-- ============================================
+-- STEP 7: PRODUCTS RLS POLICY
+-- ============================================
 DROP POLICY IF EXISTS "Enable read access for all users" ON public.products;
 CREATE POLICY "Enable read access for all users" ON public.products
 FOR SELECT TO anon, authenticated
 USING (is_active = true);
 
--- 7. VERIFY CATEGORIES RLS POLICY (should already exist)
+-- ============================================
+-- STEP 8: CATEGORIES RLS POLICY
+-- ============================================
 DROP POLICY IF EXISTS "Enable read access for all" ON public.categories;
 CREATE POLICY "Enable read access for all" ON public.categories
 FOR SELECT TO anon, authenticated
 USING (true);
 
--- 8. GRANT NECESSARY PERMISSIONS
+-- ============================================
+-- STEP 9: GRANT PERMISSIONS
+-- ============================================
 GRANT SELECT ON public.categories TO anon, authenticated;
 GRANT SELECT ON public.banners TO anon, authenticated;
 GRANT SELECT ON public.products TO anon, authenticated;
 GRANT SELECT ON public.user_roles TO authenticated;
 
--- 9. ENABLE RLS ON ALL TABLES (if not already enabled)
+-- ============================================
+-- STEP 10: ENABLE RLS ON ALL TABLES
+-- ============================================
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.banners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
@@ -122,15 +143,7 @@ ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 -- ============================================
 -- VERIFICATION QUERIES (run these after to verify)
 -- ============================================
-
--- Check categories count
 -- SELECT count(*) FROM public.categories;
-
--- Check banners count
 -- SELECT count(*) FROM public.banners WHERE active = true;
-
--- Check admin role
 -- SELECT * FROM public.user_roles WHERE role = 'admin';
-
--- Check RLS policies
 -- SELECT * FROM pg_policies WHERE tablename IN ('categories', 'banners', 'products', 'user_roles');
