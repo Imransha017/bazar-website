@@ -1,0 +1,17 @@
+[Unit]
+Description=Website (TanStack Start Node server)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/app
+EnvironmentFile=/var/www/app/.env
+ExecStart=/usr/bin/node /var/www/app/.output/server/index.mjs
+Restart=always
+RestartSec=5
+User=www-data
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target
