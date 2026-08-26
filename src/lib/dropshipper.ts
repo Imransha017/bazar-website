@@ -393,8 +393,15 @@ export async function adminListDropshippers(status?: string) {
 }
 
 export async function adminUpdateDropshipper(id: string, patch: Partial<Pick<Dropshipper, "status" | "rejection_reason">>) {
-  const { error } = await db.from("dropshippers").update(patch).eq("id", id);
+  const { error } = await db.from("dropshippers").update({ status: patch.status }).eq("id", id);
   if (error) throw error;
+  if (patch.rejection_reason !== undefined) {
+    try {
+      await db.from("dropshippers").update({ rejection_reason: patch.rejection_reason }).eq("id", id);
+    } catch {
+      // column may not exist in some deployments; ignore
+    }
+  }
 }
 
 export async function adminListPayouts(status?: string) {
@@ -405,7 +412,9 @@ export async function adminListPayouts(status?: string) {
 }
 
 export async function adminUpdatePayout(id: string, patch: Partial<Pick<DropshipperPayout, "status" | "admin_note" | "txn_reference">>) {
-  const body = { ...patch, ...(patch.status === "paid" ? { paid_at: new Date().toISOString() } : {}) };
+  const body: Record<string, unknown> = { ...(patch.status ? { status: patch.status } : {}), ...(patch.txn_reference !== undefined ? { txn_reference: patch.txn_reference } : {}) };
+  if (patch.status === "paid") body.paid_at = new Date().toISOString();
+  if (patch.admin_note !== undefined) body.admin_note = patch.admin_note;
   const { error } = await db.from("dropshipper_payouts").update(body).eq("id", id);
   if (error) throw error;
 }

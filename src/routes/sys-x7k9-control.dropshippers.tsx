@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHeader } from "@/lib/admin-ui";
-import { Rocket, Check, X, Ban, Eye, ChevronDown, Clock, Shield } from "lucide-react";
+import { Rocket, Check, X, Ban, Eye, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import {
@@ -38,8 +38,6 @@ function StoresPanel() {
   const [rows, setRows] = useState<Dropshipper[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [detail, setDetail] = useState<Dropshipper | null>(null);
-  const [rejectFor, setRejectFor] = useState<Dropshipper | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const reload = () => adminListDropshippers(filter === "all" ? undefined : filter).then(setRows);
   useEffect(() => { if (!loading && user) reload(); /* eslint-disable-next-line */ }, [filter, loading, user]);
@@ -70,24 +68,9 @@ function StoresPanel() {
     }
   };
 
-  const handleStatusChange = (r: Dropshipper, status: DsStatus) => {
+  const handleStatusChange = (r: Dropshipper, status: DsStatus, reason?: string) => {
     if (status === r.status) return;
-    if (status === "rejected") {
-      setRejectFor(r);
-      setRejectReason(r.rejection_reason ?? "");
-      return;
-    }
-    applyStatus(r.id, status);
-  };
-
-  const confirmReject = async () => {
-    if (!rejectFor) return;
-    if (!rejectReason.trim()) return toast.error("রিজেকশনের কারণ লিখতে হবে");
-    const target = rejectFor;
-    const reason = rejectReason.trim();
-    setRejectFor(null);
-    setRejectReason("");
-    await applyStatus(target.id, "rejected", reason);
+    applyStatus(r.id, status, reason);
   };
 
   return (
@@ -121,7 +104,7 @@ function StoresPanel() {
                   <td className="p-2">
                     <div className="flex items-center gap-1.5">
                       <button onClick={() => setDetail(r)} className="inline-flex items-center gap-1 rounded-lg border bg-white px-2 py-1.5 text-[10px] font-bold text-slate-700 shadow-sm hover:bg-slate-50" title="View details"><Eye className="h-3 w-3" />View</button>
-                      <StatusMenu current={r.status} disabled={updatingId === r.id} onChange={(s) => handleStatusChange(r, s)} />
+                      <StatusSegmentedControl current={r.status} disabled={updatingId === r.id} onChange={(s) => handleStatusChange(r, s)} />
                     </div>
                   </td>
                 </tr>
@@ -131,19 +114,6 @@ function StoresPanel() {
         </div>
       )}
       {detail && <DropshipperDetailModal ds={detail} onClose={() => setDetail(null)} />}
-      {rejectFor && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setRejectFor(null)}>
-          <div className="w-full max-w-md rounded-xl bg-card p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-extrabold">Reject {rejectFor.store_name}?</h3>
-            <p className="mt-1 text-xs text-muted-foreground">ড্রপশিপার এই কারণটি তাদের অ্যাপ্লিকেশন পেজে দেখতে পাবে।</p>
-            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={4} placeholder="যেমন: প্রোফাইল অসম্পূর্ণ, ভুল তথ্য, ইত্যাদি…" className="mt-3 w-full rounded border px-3 py-2 text-sm" autoFocus />
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setRejectFor(null)} className="rounded border px-4 py-1.5 text-sm hover:bg-muted">Cancel</button>
-              <button onClick={confirmReject} className="rounded bg-red-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-red-700">Confirm Reject</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -156,67 +126,62 @@ const STATUS_META: Record<DsStatus, { label: string; icon: typeof Check; cls: st
   suspended: { label: "Suspended", icon: Ban, cls: "bg-slate-700 hover:bg-slate-800 text-white", dot: "bg-slate-400" },
 };
 
-function StatusMenu({ current, onChange, disabled }: { current: DsStatus; onChange: (status: DsStatus, reason?: string) => void; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
+function StatusSegmentedControl({ current, onChange, disabled }: { current: DsStatus; onChange: (status: DsStatus, reason?: string) => void; disabled?: boolean }) {
+  const [reason, setReason] = useState("");
+  const [promptOpen, setPromptOpen] = useState(false);
 
-  const meta = STATUS_META[current];
-  const Icon = meta.icon;
   const options: { key: DsStatus; needsReason?: boolean }[] = [
     { key: "approved" }, { key: "pending" }, { key: "suspended" }, { key: "rejected", needsReason: true },
   ];
 
   const pick = (s: DsStatus, needsReason?: boolean) => {
-    setOpen(false);
     if (s === current) return;
     if (needsReason) {
-      const reason = prompt("Rejection reason?") ?? undefined;
-      onChange(s, reason);
-    } else {
-      onChange(s);
+      setPromptOpen(true);
+      return;
     }
+    onChange(s);
+  };
+
+  const confirmReject = () => {
+    if (!reason.trim()) return;
+    onChange("rejected", reason.trim());
+    setPromptOpen(false);
+    setReason("");
   };
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(v => !v)}
-        disabled={disabled}
-        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${meta.cls}`}
-      >
-        <Icon className="h-3 w-3" />
-        {meta.label}
-        <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="absolute right-0 z-30 mt-1.5 w-44 overflow-hidden rounded-xl border bg-white shadow-2xl ring-1 ring-black/5">
-          <div className="flex items-center gap-1.5 border-b bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
-            <Shield className="h-3 w-3" /> Change status
+    <div className="flex flex-col gap-1">
+      <div className={`inline-flex overflow-hidden rounded-lg border bg-white shadow-sm transition ${disabled ? "opacity-70" : ""}`}>
+        {options.map(({ key, needsReason }) => {
+          const m = STATUS_META[key];
+          const MIcon = m.icon;
+          const active = key === current;
+          return (
+            <button
+              key={key}
+              onClick={() => pick(key, needsReason)}
+              disabled={disabled || active}
+              title={m.label}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${active ? m.cls : "border-r border-slate-100 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 last:border-r-0"}`}
+            >
+              <MIcon className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{m.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      {promptOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => { setPromptOpen(false); setReason(""); }}>
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h4 className="text-sm font-extrabold text-slate-900">Rejection reason</h4>
+            <p className="mt-1 text-[11px] text-slate-500">ড্রপশিপার এই কারণটি তাদের অ্যাপ্লিকেশন পেজে দেখতে পাবে।</p>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="যেমন: প্রোফাইল অসম্পূর্ণ, ভুল তথ্য, ইত্যাদি…" className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20" autoFocus />
+            <div className="mt-3 flex justify-end gap-2">
+              <button onClick={() => { setPromptOpen(false); setReason(""); }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50">Cancel</button>
+              <button onClick={confirmReject} disabled={!reason.trim()} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60">Confirm Reject</button>
+            </div>
           </div>
-          {options.map(({ key, needsReason }) => {
-            const m = STATUS_META[key];
-            const MIcon = m.icon;
-            const active = key === current;
-            return (
-              <button
-                key={key}
-                onClick={() => pick(key, needsReason)}
-                disabled={active}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold transition ${active ? "cursor-default bg-slate-50 text-slate-400" : "text-slate-700 hover:bg-slate-50"}`}
-              >
-                <span className={`inline-block h-2 w-2 rounded-full ${m.dot}`} />
-                <MIcon className="h-3.5 w-3.5" />
-                <span className="flex-1">{m.label}</span>
-                {active && <Check className="h-3.5 w-3.5 text-green-600" />}
-              </button>
-            );
-          })}
         </div>
       )}
     </div>
